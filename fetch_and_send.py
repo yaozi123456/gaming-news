@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 游戏行业日报 — GitHub Actions 版
-v4: Bing News RSS + 国内直链 + 游戏陀螺/机核
+v5: 重要性分级 + 标题提炼 + 精选速览 + 可操作风向总结
 """
 import requests
 import feedparser
@@ -14,15 +14,14 @@ from collections import Counter
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 OUTPUT = f"{TODAY}.md"
-CUTOFF_HOURS = 168  # 7天窗口（Bing索引更新较慢）
-MONETIZATION_CUTOFF_HOURS = 720  # 商业化深度扫描放宽到30天
+CUTOFF_HOURS = 168
+MONETIZATION_CUTOFF_HOURS = 720
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 }
 
 # ==== 新闻源 ====
-# Bing News RSS（国内可访问，链接为真实URL）
 BING_BASE = "https://www.bing.com/news/search"
 BING_SOURCES = [
     ("新游 公测 上线 开服 测试", "new_game"),
@@ -33,7 +32,6 @@ BING_SOURCES = [
     ("游戏出海 海外收入 全球化 本地化", "overseas"),
 ]
 
-# 商业化扩展（7天）
 MONETIZATION_QUERIES = [
     "游戏 付费 变现 商业模式",
     "手游 活动 限定 返场",
@@ -41,7 +39,6 @@ MONETIZATION_QUERIES = [
     "游戏 玩家行为 社区运营 用户",
 ]
 
-# 垂直媒体 RSS（直链）
 DIRECT_FEEDS = [
     ("https://www.youxituoluo.com/feed", "industry"),
     ("https://www.gcores.com/rss", "steam"),
@@ -63,30 +60,32 @@ CORE_KEYWORDS = [
     "GDC", "游戏节", "展会", "发布会",
 ]
 
-BOOST_KEYWORDS = {
-    "公测": 3, "上线": 2, "收入": 2, "流水": 2, "收购": 3,
-    "融资": 2, "出海": 2, "BattlePass": 3, "通行证": 3,
-    "Steam": 2, "腾讯": 2, "网易": 2, "米哈游": 2,
+# ==== 重要性评分体系 ====
+# 来源权威度加权
+SOURCE_AUTHORITY = {
+    "腾讯": 5, "网易": 5, "米哈游": 5, "莉莉丝": 4, "鹰角": 4,
+    "叠纸": 4, "库洛": 4, "三七": 4, "完美世界": 4, "字节": 4,
+    "gcores": 3, "youxituoluo": 3, "17173": 2, "sohu": 1,
+    "sina": 1, "qq.com": 2, "msn": 1, "36kr": 3,
 }
 
-TREND_CATEGORIES = {
-    "BattlePass/通行证": ["通行证", "BattlePass", "battle pass", "战令"],
-    "抽卡/Gacha": ["抽卡", "Gacha", "卡池", "保底", "概率"],
-    "皮肤/外观付费": ["皮肤", "时装", "外观", "坐骑", "特效"],
-    "付费模式创新": ["买断制", "免费", "订阅", "月卡", "通行证"],
-    "出海/全球化": ["出海", "海外", "全球化", "全球", "国际"],
-    "新游密集上线": ["公测", "上线", "开服", "定档"],
-    "AI+游戏": ["AI", "人工智能", "AIGC", "大模型"],
-    "跨平台": ["主机", "PS5", "Xbox", "Switch", "PC", "手机"],
-    "电竞/赛事": ["电竞", "赛事", "战队", "冠军", "联赛"],
-    "停运/关服": ["停运", "关服", "停服", "下架"],
-    "收购/投融资": ["收购", "融资", "投资", "IPO", "上市"],
-    "玩家行为/社区": ["玩家", "社区", "社群", "用户", "反馈"],
+# 内容类型重要性加权
+IMPORTANCE_MARKERS = {
+    # 战略级（财报/收购/上市/政策）
+    "财报": 5, "收购": 5, "IPO": 5, "上市": 5, "融资": 4,
+    "裁员": 4, "组织架构": 4, "政策": 4, "监管": 4,
+    # 产品级（公测/上线/定档）
+    "公测": 4, "定档": 4, "首曝": 4, "正式上线": 3,
+    # 数据级（收入/流水/用户数）
+    "收入": 3, "流水": 3, "销量": 3, "用户": 2,
+    # 趋势级（AI/出海/新玩法）
+    "AI": 3, "AIGC": 3, "出海": 3, "混合变现": 3, "买断制": 3,
+    # 活动级（皮肤/返场/活动）
+    "皮肤": 2, "返场": 2, "活动": 1,
 }
 
 
 def extract_real_url(bing_url):
-    """从Bing News的apiclick.aspx链接中提取真实文章URL"""
     parsed = urlparse(bing_url)
     params = parse_qs(parsed.query)
     real = unquote(params.get("url", [""])[0])
@@ -95,19 +94,56 @@ def extract_real_url(bing_url):
     return bing_url
 
 
+def clean_title(title):
+    """提炼标题：去来源后缀、去多余标点、控制长度"""
+    # 去掉常见的来源后缀
+    title = re.sub(r'\s*[-—|–]\s*[^-—|–]+$', '', title)
+    title = re.sub(r'\s*[-—|–]\s*$', '', title)
+    # 去掉多余空格
+    title = re.sub(r'\s+', ' ', title).strip()
+    # 太长则截断（保留完整句子边界）
+    if len(title) > 80:
+        # 在最后一个标点处截断
+        cut = max(title.rfind('，', 40, 80), title.rfind('。', 40, 80),
+                  title.rfind('！', 40, 80), title.rfind('？', 40, 80))
+        if cut > 40:
+            title = title[:cut+1]
+        else:
+            title = title[:77] + "..."
+    return title
+
+
+def calc_importance(title, score):
+    """计算新闻重要性：来源权威 + 内容类型 + 关键词基础分"""
+    importance = score  # 基础分
+
+    # 来源权威
+    for source, weight in SOURCE_AUTHORITY.items():
+        if source.lower() in title.lower():
+            importance += weight
+            break
+
+    # 内容类型
+    for marker, weight in IMPORTANCE_MARKERS.items():
+        if marker.lower() in title.lower():
+            importance += weight
+
+    # 标题长度信号（太短可能是广告/水贴，太长可能是水文）
+    if 15 <= len(title) <= 60:
+        importance += 1
+
+    return importance
+
+
 def is_gaming_relevant(title):
     score = 0
     for kw in CORE_KEYWORDS:
         if kw.lower() in title.lower():
             score += 1
-    for kw, boost in BOOST_KEYWORDS.items():
-        if kw.lower() in title.lower():
-            score += boost
     return score >= 1, score
 
 
 def fetch_bing_news(query, max_results=12, cutoff_hours=None):
-    """从Bing News RSS获取新闻，提取真实直链"""
     if cutoff_hours is None:
         cutoff_hours = CUTOFF_HOURS
     url = f"{BING_BASE}?q={requests.utils.quote(query)}&format=rss"
@@ -125,14 +161,15 @@ def fetch_bing_news(query, max_results=12, cutoff_hours=None):
                 if pub_dt < cutoff:
                     continue
 
-            title = re.sub(r'\s*[-—|]\s*\S+$', '', entry.title).strip()
+            title = clean_title(entry.title)
             raw_link = entry.link
             link = extract_real_url(raw_link)
-
             relevant, score = is_gaming_relevant(title)
             if relevant:
+                importance = calc_importance(title, score)
                 items.append({
-                    "title": title, "link": link, "score": score,
+                    "title": title, "link": link,
+                    "score": score, "importance": importance,
                     "published": published or None
                 })
         return items
@@ -142,7 +179,6 @@ def fetch_bing_news(query, max_results=12, cutoff_hours=None):
 
 
 def fetch_direct_feed(feed_url, category, max_results=15):
-    """从垂直媒体RSS获取新闻（直链）"""
     now = datetime.now()
     cutoff = now - timedelta(hours=CUTOFF_HOURS)
 
@@ -157,13 +193,14 @@ def fetch_direct_feed(feed_url, category, max_results=15):
                 if pub_dt < cutoff:
                     continue
 
-            title = re.sub(r'\s*[-—|]\s*\S+$', '', entry.title).strip()
+            title = clean_title(entry.title)
             link = entry.link
-
             relevant, score = is_gaming_relevant(title)
             if relevant:
+                importance = calc_importance(title, score)
                 items.append({
-                    "title": title, "link": link, "score": score,
+                    "title": title, "link": link,
+                    "score": score, "importance": importance,
                     "category": category, "published": published or None
                 })
         return items
@@ -173,18 +210,20 @@ def fetch_direct_feed(feed_url, category, max_results=15):
 
 
 def deduplicate(items):
-    """去重，按时间降序（新的在前）+ 相关性降序"""
+    """去重，按重要性降序 + 时间降序"""
     seen = set()
     result = []
     now = datetime.now()
 
     def sort_key(item):
         pub = item.get("published")
-        if pub is None:
-            return (1, 0, -item.get("score", 0))
-        if isinstance(pub, time.struct_time):
-            pub = datetime(*pub[:6])
-        return (0, -pub.timestamp(), -item.get("score", 0))
+        has_date = 0 if pub else 1
+        ts = 0
+        if pub:
+            if isinstance(pub, time.struct_time):
+                pub = datetime(*pub[:6])
+            ts = -pub.timestamp()
+        return (has_date, -item.get("importance", 0), ts)
 
     for item in sorted(items, key=sort_key):
         key = item["title"][:35]
@@ -195,81 +234,79 @@ def deduplicate(items):
 
 
 def analyze_trends(all_items, deep_items):
+    """趋势分析：不只是关键词计数，还提取具体信号"""
     all_titles = " ".join([i["title"] for i in all_items])
     deep_titles = " ".join([i["title"] for i in deep_items])
 
-    trends = []
-    for category, keywords in TREND_CATEGORIES.items():
+    # 检测具体信号
+    signals = []
+    signal_patterns = [
+        ("大厂组织调整", ["裁员", "组织架构", "调整", "高管", "离职", "任命"],
+         "多家大厂出现裁员/高管变动/创业潮，人才从小厂流向创业公司",
+         "大厂内部在重组，招聘方向的转变会透露战略重心——你下一份工作可能不在大厂而在创业公司"),
+        ("产品关停潮", ["停运", "关服", "停服", "下架"],
+         "有产品宣布停运/关服",
+         "复盘比看成功更有价值——失败的产品往往死在付费太激进或内容枯竭，做活动时引以为戒"),
+        ("AI落地加速", ["AI", "AIGC", "大模型", "人工智能", "AI工具"],
+         "AI+游戏从概念转向落地，多家公司开始实际应用AI工具",
+         "AI不会替代策划，但会用AI的策划会替代不会的——建议开始上手体验AI素材生成工具"),
+        ("出海支付基建", ["出海", "支付", "基建", "本地化", "海外"],
+         "出海讨论升温，支付基建和本地化运营成焦点",
+         "出海运营不只是翻译语言，支付/客服/社区的全链路本地化才是竞争力，建议补充相关知识"),
+        ("混合变现探索", ["买断制", "混合变现", "订阅", "月卡", "BattlePass", "通行证"],
+         "买断制+订阅+通行证的混合变现正成为新趋势",
+         "纯IAP不再是唯一解——作为活动策划，需要理解不同付费模型下活动设计的逻辑差异"),
+        ("新游密集上线", ["公测", "上线", "开服", "定档", "新游"],
+         "本周多款新游密集上线/公测/定档，新品竞争白热化",
+         "竞品分析黄金窗口——每个新游的首日活动设计、付费引导都是一堂免费的产品课"),
+        ("大厂3A/单机布局", ["3A", "单机", "买断制", "主机"],
+         "腾讯网易等大厂加码3A/单机，产业从F2P向多元化付费转型",
+         "3A买断制和F2P手游的付费设计逻辑完全不同——理解这种差异能拓宽你做活动的思路"),
+        ("电竞商业化", ["电竞", "赛事", "战队", "冠军", "联赛"],
+         "电竞赛事品牌化和商业化加速，KPL转会冷静期信号显示行业趋于理性",
+         "赛事活动策划与游戏内活动有相通之处——赞助招商、赛程设计、用户激励都值得借鉴"),
+        ("玩家消费降级", ["性价比", "降价", "福利", "免费", "白嫖"],
+         "玩家对价格更敏感，免费福利和感知价值成为留存关键",
+         "设计活动时，确保有足够的'免费获得感'——强制付费会流失，让玩家觉得'赚了'才是好活动"),
+    ]
+
+    for name, keywords, signal_msg, takeaway in signal_patterns:
         hits = sum(1 for kw in keywords if kw.lower() in all_titles.lower())
         deep_hits = sum(1 for kw in keywords if kw.lower() in deep_titles.lower())
-        if hits > 0:
-            trends.append({
-                "category": category,
-                "hits": hits + deep_hits * 2,
-                "day_hits": hits,
-            })
+        total = hits + deep_hits * 2
+        if total > 0:
+            signals.append({"name": name, "hits": total, "signal": signal_msg, "takeaway": takeaway})
 
-    trends.sort(key=lambda x: x["hits"], reverse=True)
-    return trends[:5]
+    signals.sort(key=lambda x: x["hits"], reverse=True)
+    return signals[:5]
 
 
-def generate_wechat_message(all_items, new_game, monetization, industry,
-                             steam, esports, overseas, trends, deep_items):
-    top = all_items[:8]
-
+def generate_wechat_message(all_items, sections_data, top5, trends):
+    """生成微信推送——精选版"""
     msg = f"## 🎮 游戏日报 {TODAY}\n\n"
 
-    msg += "**今日速览**\n\n"
-    for idx, item in enumerate(top, 1):
+    # 重磅速览（只放top5）
+    msg += "**🔥 今日重磅**\n\n"
+    for idx, item in enumerate(top5, 1):
         title = item["title"][:60]
         msg += f"{idx}. [{title}]({item['link']})\n"
 
-    if new_game:
-        msg += f"\n**🆕 新游 & 测试**\n\n"
-        for idx, item in enumerate(new_game[:5], 1):
+    # 各板块（有间距）
+    for section_title, items, limit in sections_data:
+        if not items:
+            continue
+        msg += f"\n**{section_title}**\n\n"
+        for idx, item in enumerate(items[:limit], 1):
             title = item["title"][:55]
             msg += f"{idx}. [{title}]({item['link']})\n"
 
-    all_monetization = deduplicate(monetization + deep_items)
-    if all_monetization:
-        msg += f"\n**💰 商业化 & 活动**\n\n"
-        for idx, item in enumerate(all_monetization[:5], 1):
-            title = item["title"][:55]
-            msg += f"{idx}. [{title}]({item['link']})\n"
-
-    if steam:
-        msg += f"\n**🎮 Steam & 主机**\n\n"
-        for idx, item in enumerate(steam[:4], 1):
-            title = item["title"][:55]
-            msg += f"{idx}. [{title}]({item['link']})\n"
-
-    if industry:
-        msg += f"\n**📊 行业动态**\n\n"
-        for idx, item in enumerate(industry[:4], 1):
-            title = item["title"][:55]
-            msg += f"{idx}. [{title}]({item['link']})\n"
-
+    # 从业者启示
     if trends:
-        msg += f"\n---\n**🌬️ 今日风向**\n\n"
-        trend_labels = {
-            "BattlePass/通行证": "战令/通行证话题活跃，关注付费分层和奖励设计",
-            "抽卡/Gacha": "抽卡/Gacha讨论增多，留意概率公示和保底机制走向",
-            "皮肤/外观付费": "外观付费持续升温，皮肤经济和限定策略值得关注",
-            "付费模式创新": "付费模式有新探索，订阅/买断/混合变现值得研究",
-            "出海/全球化": "出海动态密集，关注本地化运营和支付基建",
-            "新游密集上线": "新游密集上线期，首日留存和付费设计是观察重点",
-            "AI+游戏": "AI与游戏结合话题出现，关注AIGC落地进展",
-            "跨平台": "跨平台趋势明显，PC+主机+手机多端互通成标配",
-            "电竞/赛事": "电竞话题活跃，赛事商业化和战队运营值得关注",
-            "停运/关服": "有产品关停消息，分析失败原因比看成功更有价值",
-            "收购/投融资": "资本动作频繁，关注收并购背后的战略布局",
-            "玩家行为/社区": "玩家行为讨论增加，社区运营和用户研究有新动向",
-        }
-        for t in trends[:3]:
-            label = trend_labels.get(t["category"], t["category"])
-            msg += f"- **{t['category']}**：{label}\n"
+        msg += f"\n---\n**💡 从业者启示**\n\n"
+        for t in trends[:4]:
+            msg += f"▪ **{t['name']}**\n  {t.get('signal', '')}\n  → {t['takeaway']}\n\n"
 
-    msg += f"\n[📋 查看完整日报](https://github.com/yaozi123456/gaming-news/blob/master/{TODAY}.md)"
+    msg += f"[📋 查看完整日报](https://github.com/yaozi123456/gaming-news/blob/master/{TODAY}.md)"
 
     return msg
 
@@ -279,14 +316,12 @@ def generate_report():
 
     all_news = {}
 
-    # Bing News RSS
     for query, category in BING_SOURCES:
         print(f"  Bing: {query[:30]}")
         results = fetch_bing_news(query)
         all_news[category] = results
         time.sleep(1.0)
 
-    # 垂直媒体 RSS
     for feed_url, category in DIRECT_FEEDS:
         print(f"  直连: {feed_url[:40]}")
         results = fetch_direct_feed(feed_url, category)
@@ -294,7 +329,6 @@ def generate_report():
         all_news[category] = existing + results
         time.sleep(0.5)
 
-    # 商业化扩展（7天深度扫描）
     deep_items = []
     for query in MONETIZATION_QUERIES:
         print(f"  深度: {query[:30]}")
@@ -302,7 +336,6 @@ def generate_report():
         deep_items.extend(results)
         time.sleep(0.8)
 
-    # 合并
     all_items = []
     for cat, items in all_news.items():
         for item in items:
@@ -312,6 +345,9 @@ def generate_report():
     all_items = deduplicate(all_items)
     deep_items = deduplicate(deep_items)
 
+    # Top5 重磅新闻（按importance排序）
+    top5 = sorted(all_items, key=lambda x: -x.get("importance", 0))[:5]
+
     # 分类
     new_game = [i for i in all_items if i["category"] == "new_game"]
     monetization = [i for i in all_items if i["category"] == "monetization"]
@@ -320,6 +356,7 @@ def generate_report():
     esports = [i for i in all_items if i["category"] == "esports"]
     overseas = [i for i in all_items if i["category"] == "overseas"]
 
+    all_monetization = deduplicate(monetization + deep_items)
     trends = analyze_trends(all_items, deep_items)
 
     # ==== Markdown 报告 ====
@@ -329,77 +366,91 @@ def generate_report():
 
 ---
 
-## 今日速览
+## 今日重磅
 
 """
-    top_items = all_items[:10]
-    for idx, item in enumerate(top_items, 1):
-        md += f"{idx}. [{item['title']}]({item['link']})\n"
 
+    for idx, item in enumerate(top5, 1):
+        md += f"{idx}. ⭐ [{item['title']}]({item['link']})\n"
+
+    # 分类板块
     sections = [
         ("新游 & 测试动态", new_game, 6),
-        ("商业化 & 活动", deduplicate(monetization + deep_items), 6),
+        ("商业化 & 活动", all_monetization, 6),
         ("行业动态", industry, 5),
         ("Steam & 主机", steam, 6),
         ("出海 & 全球化", overseas, 5),
         ("电竞 & 赛事", esports, 5),
     ]
 
-    for title, items, count in sections:
+    for sec_title, items, count in sections:
         if not items:
             continue
         md += f"""
+
 ---
 
-## {title}
+## {sec_title}
 
 """
         for idx, item in enumerate(items[:count], 1):
             md += f"{idx}. [{item['title']}]({item['link']})\n"
 
+    # 从业者启示
     if trends:
         md += f"""
+
 ---
 
-## 风向总结
+## 从业者启示
 
-> 基于今日新闻关键词聚类 + 近7天商业化深度扫描
+> 不只是看新闻，更是你的行业雷达。以下是基于今日新闻提炼的 actionable insights：
 
 """
-        md += "| 趋势方向 | 热度 | 解读 |\n"
-        md += "|----------|------|------|\n"
-        trend_insights = {
-            "BattlePass/通行证": "通行证/战令话题活跃，关注付费分层设计",
-            "抽卡/Gacha": "抽卡讨论增多，概率公示和保底机制成焦点",
-            "皮肤/外观付费": "外观付费持续升温，限定策略值得研究",
-            "付费模式创新": "付费模式有新探索，混合变现成趋势",
-            "出海/全球化": "出海动态密集，本地化运营和支付是关键",
-            "新游密集上线": "新游密集上线，首日留存和付费转化是观察窗口",
-            "AI+游戏": "AI与游戏结合加速，AIGC落地值得关注",
-            "跨平台": "多端互通成标配，跨平台策略值得研究",
-            "电竞/赛事": "赛事商业化持续推进",
-            "停运/关服": "产品关停值得复盘：失败比成功更有学习价值",
-            "收购/投融资": "资本动作频繁，背后战略布局值得关注",
-            "玩家行为/社区": "玩家行为讨论增加，社区运营有新动向",
-        }
-        for t in trends[:5]:
-            heat = "🔥" * min(3, t["hits"])
-            insight = trend_insights.get(t["category"], "")
-            md += f"| {t['category']} | {heat} | {insight} |\n"
+        for t in trends:
+            md += f"\n### {t['name']}\n\n"
+            md += f"**信号**：{t.get('signal', '今日相关讨论热度高，涉及多家厂商或产品。')}\n\n"
+            md += f"**对你意味着什么**：{t['takeaway']}\n\n"
+            md += f"**建议行动**："
+            suggestions = {
+                "大厂组织调整": "关注目标公司招聘官网和脉脉讨论，了解HC变化和团队动态",
+                "产品关停潮": "选一个近期关停的产品，花1小时分析其生命周期和可能的失败原因",
+                "AI落地加速": "本周抽2小时体验一款AI游戏工具（如Scenario/Cursor），思考能否用到活动素材生成中",
+                "出海支付基建": "阅读一篇出海支付/本地化运营的深度文章，建立基础知识框架",
+                "混合变现探索": "找一款混合变现做得好的产品（如Gossip Harbor），拆解其付费节点和奖励设计",
+                "新游密集上线": "选1-2款本周上线的新游，记录其首日活动设计、付费引导和社交裂变玩法",
+                "大厂3A/单机布局": "对比3A买断制和F2P手游的付费设计差异，思考不同付费模型的活动设计逻辑",
+                "电竞商业化": "关注电竞赛事的赞助品牌和活动形式，思考游戏内活动如何借鉴赛事营销手法",
+                "玩家消费降级": "回顾自己做过的活动，检查是否有足够的'免费获得感'而非纯付费压力",
+            }
+            action = suggestions.get(t['name'], "将相关文章加入阅读清单，周末做一次专题学习")
+            md += f"{action}\n"
 
     md += f"""
----
-
-## 学习启发
-
-- 留意今日**新游上线/测试动态**中的玩法和付费设计，想想能否借鉴到自己的项目中
-- 关注**商业化板块**的活动机制、定价策略、BattlePass设计
-- 行业投融资动态反映资本方向，可判断哪些赛道在升温
-- 风向总结中的趋势可作为周报/月报分析的切入点
 
 ---
 
-*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')} UTC · 共 {len(all_items)} 条（含7天商业化深度扫描）*
+## 学习资源线索
+
+以下新闻标题中包含值得深挖的知识点，建议选择性搜索学习：
+
+"""
+    # 找3-5个有学习价值的标题
+    learn_keywords = ["怎么", "为什么", "如何", "报告", "趋势", "分析", "复盘", "拆解", "指南", "盘点", "深度", "洞察"]
+    learn_items = [i for i in all_items if any(
+        kw in i["title"] for kw in learn_keywords
+    )][:5]
+    if learn_items:
+        for idx, item in enumerate(learn_items, 1):
+            md += f"{idx}. [{item['title']}]({item['link']})\n"
+    else:
+        md += "- 今日暂无特别推荐的学习向文章，可自行浏览各板块链接\n"
+
+    md += f"""
+
+---
+
+*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')} UTC · 共 {len(all_items)} 条（含30天商业化深度扫描）*
 """
 
     with open(OUTPUT, "w", encoding="utf-8") as f:
@@ -407,10 +458,14 @@ def generate_report():
 
     print(f"\n✅ 报告已生成: {OUTPUT} ({len(all_items)} 条新闻)")
 
-    wechat_msg = generate_wechat_message(
-        all_items, new_game, monetization, industry,
-        steam, esports, overseas, trends, deep_items
-    )
+    # 微信推送
+    wechat_sections = [
+        ("🆕 新游 & 测试", new_game, 4),
+        ("💰 商业化 & 活动", all_monetization, 4),
+        ("📊 行业动态", industry, 4),
+        ("🎮 Steam & 主机", steam, 4),
+    ]
+    wechat_msg = generate_wechat_message(all_items, wechat_sections, top5, trends)
     return len(all_items), wechat_msg
 
 
