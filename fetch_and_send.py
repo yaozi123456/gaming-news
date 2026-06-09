@@ -302,13 +302,101 @@ def generate_wechat_message(all_items, sections_data, top5, trends):
 
     # 从业者启示
     if trends:
+        insight_slugs = {
+            "新游密集上线": "new-game-wave", "AI落地加速": "ai-in-gaming",
+            "混合变现探索": "hybrid-monetization", "大厂3A/单机布局": "aaa-single-player",
+            "大厂组织调整": "studio-restructuring", "产品关停潮": "game-shutdown-wave",
+            "出海支付基建": "overseas-payment-infra", "电竞商业化": "esports-business",
+            "玩家消费降级": "player-spending-shift",
+        }
         msg += f"\n---\n**💡 从业者启示**\n\n"
         for t in trends[:4]:
-            msg += f"▪ **{t['name']}**\n  {t.get('signal', '')}\n  → {t['takeaway']}\n\n"
+            slug = insight_slugs.get(t['name'], '')
+            insight_url = f"https://github.com/yaozi123456/gaming-news/blob/master/insights/{slug}.md" if slug else ""
+            if insight_url:
+                msg += f"▪ **[{t['name']}]({insight_url})**\n"
+            else:
+                msg += f"▪ **{t['name']}**\n"
+            msg += f"  {t.get('signal', '')}\n"
+            msg += f"  → {t['takeaway']}\n\n"
 
     msg += f"[📋 查看完整日报](https://github.com/yaozi123456/gaming-news/blob/master/{TODAY}.md)"
 
     return msg
+
+
+def update_insight_page(path, trend, all_items, action):
+    """创建/更新启示深度页面，追加来源链接"""
+    slug = path.replace("insights/", "").replace(".md", "")
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # 找到触发此启示的来源文章
+    signal_keywords = {
+        "new-game-wave": ["公测", "上线", "开服", "定档", "新游"],
+        "ai-in-gaming": ["AI", "AIGC", "大模型", "人工智能"],
+        "hybrid-monetization": ["买断制", "混合变现", "订阅", "月卡", "通行证", "BattlePass"],
+        "aaa-single-player": ["3A", "单机", "买断制", "主机"],
+        "studio-restructuring": ["裁员", "组织架构", "调整", "高管", "离职", "任命"],
+        "game-shutdown-wave": ["停运", "关服", "停服", "下架"],
+        "overseas-payment-infra": ["出海", "支付", "基建", "本地化", "海外"],
+        "esports-business": ["电竞", "赛事", "战队", "冠军", "联赛"],
+        "player-spending-shift": ["性价比", "降价", "福利", "免费", "白嫖"],
+    }
+
+    keywords = signal_keywords.get(slug, [])
+    sources = [i for i in all_items if any(kw in i["title"] for kw in keywords)][:8]
+
+    # 检查文件是否存在
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            existing = f.read()
+        # 追加今日来源
+        new_section = f"\n\n## 📅 {today} 更新\n\n"
+        new_section += "**当日信号来源**：\n\n"
+        for s in sources[:5]:
+            new_section += f"- [{s['title']}]({s['link']})\n"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(new_section)
+    else:
+        # 新建文件：框架（Claude cron 会补充深度内容）
+        content = f"""# {trend['name']}
+
+> 游戏行业从业者深度参考 · 基于每日新闻持续更新
+
+---
+
+## 最新信号
+
+**{today}**：{trend.get('signal', '')}
+
+{trend['takeaway']}
+
+### 建议行动
+
+{action}
+
+---
+
+## 来源文章
+
+"""
+        for s in sources[:6]:
+            content += f"- [{s['title']}]({s['link']})\n"
+
+        content += f"""
+
+---
+
+## 为什么这很重要
+
+> 💡 Claude Code 每日定时任务会在此补充深度分析、案例拆解和行业背景。
+
+---
+
+*页面创建于 {today} · 每日自动更新*
+"""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
 
 
 def generate_report():
@@ -396,35 +484,58 @@ def generate_report():
         for idx, item in enumerate(items[:count], 1):
             md += f"{idx}. [{item['title']}]({item['link']})\n"
 
-    # 从业者启示
+    # 从业者启示 - 生成深度页面并链接
     if trends:
+        os.makedirs("insights", exist_ok=True)
+        insight_slugs = {
+            "新游密集上线": "new-game-wave",
+            "AI落地加速": "ai-in-gaming",
+            "混合变现探索": "hybrid-monetization",
+            "大厂3A/单机布局": "aaa-single-player",
+            "大厂组织调整": "studio-restructuring",
+            "产品关停潮": "game-shutdown-wave",
+            "出海支付基建": "overseas-payment-infra",
+            "电竞商业化": "esports-business",
+            "玩家消费降级": "player-spending-shift",
+        }
+
+        suggestions = {
+            "大厂组织调整": "关注目标公司招聘官网和脉脉讨论，了解HC变化和团队动态",
+            "产品关停潮": "选一个近期关停的产品，花1小时分析其生命周期和可能的失败原因",
+            "AI落地加速": "本周抽2小时体验一款AI游戏工具（如Scenario/Cursor），思考能否用到活动素材生成中",
+            "出海支付基建": "阅读一篇出海支付/本地化运营的深度文章，建立基础知识框架",
+            "混合变现探索": "找一款混合变现做得好的产品（如Gossip Harbor），拆解其付费节点和奖励设计",
+            "新游密集上线": "选1-2款本周上线的新游，记录其首日活动设计、付费引导和社交裂变玩法",
+            "大厂3A/单机布局": "对比3A买断制和F2P手游的付费设计差异，思考不同付费模型的活动设计逻辑",
+            "电竞商业化": "关注电竞赛事的赞助品牌和活动形式，思考游戏内活动如何借鉴赛事营销手法",
+            "玩家消费降级": "回顾自己做过的活动，检查是否有足够的'免费获得感'而非纯付费压力",
+        }
+
+        for t in trends:
+            slug = insight_slugs.get(t['name'], re.sub(r'[^\w]', '-', t['name']))
+            insight_path = f"insights/{slug}.md"
+            action = suggestions.get(t['name'], "将相关文章加入阅读清单，周末做一次专题学习")
+
+            # 更新/创建深度页面
+            update_insight_page(insight_path, t, all_items, action)
+
         md += f"""
 
 ---
 
 ## 从业者启示
 
-> 不只是看新闻，更是你的行业雷达。以下是基于今日新闻提炼的 actionable insights：
+> 不只是看新闻，更是你的行业雷达。点击标题查看深度分析：
 
 """
         for t in trends:
-            md += f"\n### {t['name']}\n\n"
-            md += f"**信号**：{t.get('signal', '今日相关讨论热度高，涉及多家厂商或产品。')}\n\n"
+            slug = insight_slugs.get(t['name'], re.sub(r'[^\w]', '-', t['name']))
+            insight_url = f"https://github.com/yaozi123456/gaming-news/blob/master/insights/{slug}.md"
+            action = suggestions.get(t['name'], "")
+            md += f"\n### [{t['name']}]({insight_url})\n\n"
+            md += f"**信号**：{t.get('signal', '今日相关讨论热度高。')}\n\n"
             md += f"**对你意味着什么**：{t['takeaway']}\n\n"
-            md += f"**建议行动**："
-            suggestions = {
-                "大厂组织调整": "关注目标公司招聘官网和脉脉讨论，了解HC变化和团队动态",
-                "产品关停潮": "选一个近期关停的产品，花1小时分析其生命周期和可能的失败原因",
-                "AI落地加速": "本周抽2小时体验一款AI游戏工具（如Scenario/Cursor），思考能否用到活动素材生成中",
-                "出海支付基建": "阅读一篇出海支付/本地化运营的深度文章，建立基础知识框架",
-                "混合变现探索": "找一款混合变现做得好的产品（如Gossip Harbor），拆解其付费节点和奖励设计",
-                "新游密集上线": "选1-2款本周上线的新游，记录其首日活动设计、付费引导和社交裂变玩法",
-                "大厂3A/单机布局": "对比3A买断制和F2P手游的付费设计差异，思考不同付费模型的活动设计逻辑",
-                "电竞商业化": "关注电竞赛事的赞助品牌和活动形式，思考游戏内活动如何借鉴赛事营销手法",
-                "玩家消费降级": "回顾自己做过的活动，检查是否有足够的'免费获得感'而非纯付费压力",
-            }
-            action = suggestions.get(t['name'], "将相关文章加入阅读清单，周末做一次专题学习")
-            md += f"{action}\n"
+            md += f"**建议行动**：{action}\n"
 
     md += f"""
 
