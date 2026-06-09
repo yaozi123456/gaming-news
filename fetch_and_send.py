@@ -14,6 +14,7 @@ import json
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 OUTPUT = f"{TODAY}.md"
+CUTOFF_HOURS = 48  # 只保留48小时内的新闻
 
 # ==== 数据源配置 ====
 # 使用更精准的搜索词提高相关性
@@ -75,15 +76,26 @@ def is_gaming_relevant(title):
 
 
 def fetch_google_news(query, max_results=12):
-    """从Google News RSS获取标题和链接"""
-    url = f"{GNEWS_BASE}?q={requests.utils.quote(query)}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    """从Google News RSS获取标题和链接，只保留48小时内新闻"""
+    # Google News 搜索语法：when:24h 限制最近24小时
+    full_query = f"{query} when:24h"
+    url = f"{GNEWS_BASE}?q={requests.utils.quote(full_query)}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    now = datetime.now()
+    cutoff = now - timedelta(hours=CUTOFF_HOURS)
+
     try:
         feed = feedparser.parse(url)
         items = []
         for entry in feed.entries[:max_results]:
+            # 时间过滤：丢弃超过48小时的新闻
+            published = entry.get("published_parsed")
+            if published:
+                pub_dt = datetime(*published[:6])
+                if pub_dt < cutoff:
+                    continue
+
             title = re.sub(r'\s*-\s*\S+$', '', entry.title).strip()
             link = entry.link
-            # 关键词过滤
             relevant, score = is_gaming_relevant(title)
             if relevant:
                 items.append({"title": title, "link": link, "score": score})
