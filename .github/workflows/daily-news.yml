@@ -23,6 +23,11 @@ jobs:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
         run: python3 fetch_and_send.py
 
+      - name: Deepen insights with AI
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python3 deepen_insights.py
+
       - name: Send email
         env:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
