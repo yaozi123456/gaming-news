@@ -56,6 +56,6 @@ jobs:
         run: |
           git config user.name "Game News Bot"
           git config user.email "news-bot@game-daily.dev"
-          git add *.md
+          git add *.md insights/
           git diff --staged --quiet || git commit -m "Daily report $(date +%Y-%m-%d)"
           git push
