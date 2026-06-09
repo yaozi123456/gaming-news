@@ -82,3 +82,14 @@
 ---
 
 *页面创建于 2026-06-10 · 每日自动更新*
+
+## 📅 2026-06-10 更新
+
+**当日信号来源**：
+
+- [腾讯3A单机首曝，《遗忘之海》定档7月，《影之刃零》延期发售](https://www.youxituoluo.com/534559.html)
+- [《卡厄思梦境》国服公测：在海外风生水起的“DBG+肉鸽+二游”玩法，国内能否实现通吃？](https://www.sohu.com/a/1032440174_121846689)
+- [整体性的表达意味着什么？网易新游或许带来一种答案](https://www.gameres.com/917646.html)
+- [几小时做出一款游戏：前字节AI小镇负责人上线游戏开发工具](https://mp.weixin.qq.com/s/oFI_mEzWcn82ftwMFyDNEw)
+- [游族做了款「流水线」SLG，Tap4Fun新游融了AI短剧](https://mp.weixin.qq.com/s/2Wdtos9MtaVNM5lIkUZ3Yw)
+

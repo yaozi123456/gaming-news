@@ -209,6 +209,77 @@ def fetch_direct_feed(feed_url, category, max_results=15):
         return []
 
 
+def fetch_gameres():
+    """从游资网 GameRes 获取深度文章（JSON API）"""
+    url = "https://www.gameres.com/newslistJson"
+    now = datetime.now()
+    cutoff = now - timedelta(hours=CUTOFF_HOURS)
+
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        data = resp.json()
+        items = []
+        for article in data.get("list", []):
+            ts = article.get("dateline", 0)
+            pub_dt = datetime.fromtimestamp(ts)
+            if pub_dt < cutoff:
+                continue
+
+            title = clean_title(article.get("subject", ""))
+            if not title:
+                continue
+
+            if article.get("is_wailian"):
+                link = article.get("wailian", "")
+            else:
+                link = "https://www.gameres.com" + article.get("url", "")
+
+            tags = [t.get("tname", "") for t in article.get("tags", [])]
+            tag_str = ",".join(tags)
+
+            if "产品分析" in tag_str or "拆解分析" in tag_str:
+                category = "deep_analysis"
+            elif "Steam" in tag_str:
+                category = "steam"
+            elif "电子竞技" in tag_str:
+                category = "esports"
+            elif "厂商" in tag_str or "观察" in tag_str:
+                category = "industry"
+            else:
+                category = "industry"
+
+            importance = 3
+            if "推荐" in tag_str:
+                importance += 2
+            if "产品分析" in tag_str or "拆解分析" in tag_str:
+                importance += 2
+            if "原创" in tag_str:
+                importance += 1
+            if "专访" in tag_str:
+                importance += 1
+            if 15 <= len(title) <= 60:
+                importance += 1
+
+            summary = article.get("summary", "")
+            if len(summary) > 50:
+                importance += 1
+
+            items.append({
+                "title": title,
+                "link": link,
+                "score": 2,
+                "importance": importance,
+                "category": category,
+                "published": pub_dt.timetuple() if pub_dt else None,
+                "source": "gameres"
+            })
+        print(f"  GameRes: {len(items)}篇")
+        return items
+    except Exception as e:
+        print(f"  ⚠️ GameRes 获取失败: {e}")
+        return []
+
+
 def deduplicate(items):
     """去重，按重要性降序 + 时间降序"""
     seen = set()
@@ -350,6 +421,9 @@ def update_insight_page(path, trend, all_items, action):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             existing = f.read()
+        # 避免同一天重复追加
+        if f"## 📅 {today} 更新" in existing:
+            return
         # 追加今日来源
         new_section = f"\n\n## 📅 {today} 更新\n\n"
         new_section += "**当日信号来源**：\n\n"
@@ -417,6 +491,13 @@ def generate_report():
         all_news[category] = existing + results
         time.sleep(0.5)
 
+    print("  GameRes 游资网:")
+    gameres_items = fetch_gameres()
+    for item in gameres_items:
+        cat = item.get("category", "industry")
+        existing = all_news.get(cat, [])
+        all_news[cat] = existing + [item]
+
     deep_items = []
     for query in MONETIZATION_QUERIES:
         print(f"  深度: {query[:30]}")
@@ -443,6 +524,7 @@ def generate_report():
     steam = [i for i in all_items if i["category"] == "steam"]
     esports = [i for i in all_items if i["category"] == "esports"]
     overseas = [i for i in all_items if i["category"] == "overseas"]
+    deep_analysis = [i for i in all_items if i["category"] == "deep_analysis"]
 
     all_monetization = deduplicate(monetization + deep_items)
     trends = analyze_trends(all_items, deep_items)
@@ -450,7 +532,7 @@ def generate_report():
     # ==== Markdown 报告 ====
     md = f"""# 游戏行业日报 — {TODAY}
 
-> 🤖 自动生成 · 来源：Bing News + 游戏陀螺 + 机核 · [查看往期](./index.md)
+> 🤖 自动生成 · 来源：Bing News + 游戏陀螺 + 机核 + 游资网 · [查看往期](./index.md)
 
 ---
 
@@ -463,6 +545,7 @@ def generate_report():
 
     # 分类板块
     sections = [
+        ("深度分析 · 游资网", deep_analysis, 5),
         ("新游 & 测试动态", new_game, 6),
         ("商业化 & 活动", all_monetization, 6),
         ("行业动态", industry, 5),

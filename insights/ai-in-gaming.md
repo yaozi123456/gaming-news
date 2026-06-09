@@ -74,3 +74,14 @@ AI不会替代策划，但会用AI的策划会替代不会的——建议开始�
 ---
 
 *页面创建于 2026-06-10 · 每日自动更新*
+
+## 📅 2026-06-10 更新
+
+**当日信号来源**：
+
+- [（万字长文）AI 原生游戏狂热：从创世神到地下城主](https://mp.weixin.qq.com/s/enPMyFclH8TUbibewUCXWQ)
+- [用大白话指挥AI做出一款游戏后，我明白游戏人的焦虑了](https://www.youxituoluo.com/534560.html)
+- [《2025游戏安全白皮书》发布，游戏黑产超100亿元AI攻防受关注](https://www.gameres.com/917662.html)
+- [几小时做出一款游戏：前字节AI小镇负责人上线游戏开发工具](https://mp.weixin.qq.com/s/oFI_mEzWcn82ftwMFyDNEw)
+- [游族做了款「流水线」SLG，Tap4Fun新游融了AI短剧](https://mp.weixin.qq.com/s/2Wdtos9MtaVNM5lIkUZ3Yw)
+
