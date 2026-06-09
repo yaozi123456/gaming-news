@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests feedparser beautifulsoup4 lxml
+        run: pip install requests feedparser
 
       - name: Generate daily report
         run: python3 fetch_and_send.py
@@ -49,6 +49,26 @@ jobs:
           server.quit()
           print('Email sent')
           "
+
+      - name: Push to WeChat (Server酱)
+        env:
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+        run: |
+          if [ -n "$SERVERCHAN_SENDKEY" ]; then
+            python3 -c "
+          import requests, os
+          from datetime import datetime
+          date_str = datetime.now().strftime('%Y-%m-%d')
+          with open(f'{date_str}.md', 'r', encoding='utf-8') as f:
+              content = f.read()[:800]
+          sendkey = os.environ['SERVERCHAN_SENDKEY']
+          url = f'https://sctapi.ftqq.com/{sendkey}.send'
+          resp = requests.post(url, data={'title': f'🎮 游戏日报 {date_str}', 'desp': content}, timeout=10)
+          print(resp.json())
+          "
+          else
+            echo "SERVERCHAN_SENDKEY not set, skipping WeChat push"
+          fi
 
       - name: Commit report
         run: |
