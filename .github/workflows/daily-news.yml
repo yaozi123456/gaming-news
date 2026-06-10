@@ -2,7 +2,7 @@ name: Daily Gaming News
 
 on:
   schedule:
-    - cron: "58 0 * * *"  # 8:58 AM Beijing time (UTC+8)
+    - cron: "50 0 * * *"  # 8:50 AM Beijing time (UTC+8)
   workflow_dispatch:       # Allow manual trigger
 
 jobs:
@@ -22,40 +22,6 @@ jobs:
         env:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
         run: python3 fetch_and_send.py
-
-      - name: Deepen insights with AI
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python3 deepen_insights.py
-
-      - name: Send email
-        env:
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-        run: |
-          python3 -c "
-          import smtplib, os
-          from email.mime.text import MIMEText
-          from email.mime.multipart import MIMEMultipart
-          from datetime import datetime
-
-          date_str = datetime.now().strftime('%Y-%m-%d')
-          filepath = f'{date_str}.md'
-
-          with open(filepath, 'r', encoding='utf-8') as f:
-              body = f.read()
-
-          msg = MIMEMultipart()
-          msg['From'] = 'xyokokok@163.com'
-          msg['To'] = 'xyokokok@163.com'
-          msg['Subject'] = f'🎮 游戏行业日报 {date_str}'
-          msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-          server = smtplib.SMTP_SSL('smtp.163.com', 465)
-          server.login('xyokokok@163.com', os.environ['SMTP_PASS'])
-          server.sendmail('xyokokok@163.com', 'xyokokok@163.com', msg.as_string())
-          server.quit()
-          print('Email sent')
-          "
 
       - name: Commit report
         run: |
